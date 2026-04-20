@@ -13,8 +13,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,13 +42,16 @@ fun HomeScreen(
     myId: String,
     serverUrl: String,
     connState: ConnState,
+    errorMessage: String?,
     conversations: Map<String, List<com.ghostchat.app.model.Message>>,
     onUpdateServer: (String) -> Unit,
+    onTrustNewIdentity: () -> Unit,
     onOpenChat: (String) -> Unit
 ) {
     val clipboard: ClipboardManager = LocalClipboardManager.current
     var recipient by remember { mutableStateOf("") }
     var urlField by remember(serverUrl) { mutableStateOf(serverUrl) }
+    val urlIsValid = urlField.trim().startsWith("wss://", ignoreCase = true)
 
     Scaffold(
         topBar = {
@@ -66,7 +71,7 @@ fun HomeScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = myId,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f)
                         )
@@ -82,16 +87,47 @@ fun HomeScreen(
                 }
             }
 
+            if (connState == ConnState.PinMismatch || errorMessage != null) {
+                Spacer(Modifier.height(12.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            errorMessage ?: "Connection error",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (connState == ConnState.PinMismatch) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = onTrustNewIdentity) {
+                                Text("Trust new server identity")
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = urlField,
                 onValueChange = { urlField = it },
                 label = { Text("Server URL (wss://host/ws)") },
+                isError = !urlIsValid,
+                supportingText = {
+                    if (!urlIsValid) Text("URL must start with wss://")
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { onUpdateServer(urlField.trim()) }) { Text("Reconnect") }
+            Button(
+                onClick = { onUpdateServer(urlField.trim()) },
+                enabled = urlIsValid
+            ) { Text("Reconnect") }
 
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
@@ -115,10 +151,7 @@ fun HomeScreen(
             Spacer(Modifier.height(8.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(conversations.entries.toList()) { entry ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                    ) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             Modifier
                                 .fillMaxWidth()

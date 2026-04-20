@@ -37,6 +37,7 @@ private fun App() {
     val connState by vm.connState.collectAsState()
     val conversations by vm.conversations.collectAsState()
     val serverUrl by vm.serverUrl.collectAsState()
+    val errorMessage by vm.errors.collectAsState()
 
     var openedPeer by remember { mutableStateOf<String?>(null) }
     val peer = openedPeer
@@ -46,8 +47,10 @@ private fun App() {
             myId = vm.myId,
             serverUrl = serverUrl,
             connState = connState,
+            errorMessage = errorMessage,
             conversations = conversations,
             onUpdateServer = vm::updateServerUrl,
+            onTrustNewIdentity = vm::trustNewServerIdentity,
             onOpenChat = { openedPeer = it }
         )
     } else {

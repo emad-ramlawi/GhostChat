@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ghostchat.app.data.ConnState
+import com.ghostchat.app.data.Crypto
+import com.ghostchat.app.data.PinStore
 import com.ghostchat.app.data.UserPrefs
 import com.ghostchat.app.data.WebSocketClient
 import com.ghostchat.app.model.Message
@@ -15,7 +17,9 @@ import kotlinx.coroutines.launch
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = UserPrefs(app)
-    val myId: String = prefs.userId
+    private val pinStore = PinStore(app)
+    private val crypto = Crypto(app)
+    val myId: String = crypto.userId
 
     private val _serverUrl = MutableStateFlow(prefs.serverUrl)
     val serverUrl: StateFlow<String> = _serverUrl.asStateFlow()
@@ -23,6 +27,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var client: WebSocketClient = newClient(_serverUrl.value)
 
     val connState: StateFlow<ConnState> get() = client.state
+    val errors: StateFlow<String?> get() = client.errors
 
     private val _conversations = MutableStateFlow<Map<String, List<Message>>>(emptyMap())
     val conversations: StateFlow<Map<String, List<Message>>> = _conversations.asStateFlow()
@@ -32,14 +37,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         observeIncoming()
     }
 
-    private fun newClient(url: String) = WebSocketClient(viewModelScope, myId, url)
+    private fun newClient(url: String) = WebSocketClient(viewModelScope, myId, url, pinStore)
 
     private fun observeIncoming() {
         viewModelScope.launch {
-            client.messages.collect { msg ->
-                if (msg.type != "msg") return@collect
-                val peer = if (msg.from == myId) msg.to else msg.from
-                appendLocally(peer, msg)
+            client.messages.collect { wire ->
+                if (wire.type != "msg") return@collect
+                val peer = if (wire.from == myId) wire.to else wire.from
+                val plain = crypto.decryptFrom(wire.from, wire.body) ?: "[undecryptable]"
+                appendLocally(peer, wire.copy(body = plain))
             }
         }
     }
@@ -48,17 +54,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (url == _serverUrl.value) return
         prefs.serverUrl = url
         _serverUrl.value = url
+        restartClient()
+    }
+
+    fun trustNewServerIdentity() {
+        val host = WebSocketClient.hostOf(_serverUrl.value)
+        if (host.isBlank()) return
+        pinStore.remove(host)
+        restartClient()
+    }
+
+    private fun restartClient() {
         client.stop()
-        client = newClient(url)
+        client = newClient(_serverUrl.value)
         client.start()
         observeIncoming()
     }
 
     fun sendMessage(to: String, body: String) {
         if (to.isBlank() || body.isBlank()) return
-        val msg = Message(type = "msg", from = myId, to = to, body = body)
-        client.enqueue(msg)
-        appendLocally(to, msg)
+        val cipher = crypto.encryptTo(to, body) ?: return
+        val wire = Message(type = "msg", from = myId, to = to, body = cipher)
+        client.enqueue(wire)
+        appendLocally(to, wire.copy(body = body))
     }
 
     private fun appendLocally(peer: String, msg: Message) {
